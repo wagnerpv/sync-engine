@@ -71,7 +71,7 @@ def transaction_objects():
 
     """
     from inbox.models import (Calendar, Contact, Message, Event, Block,
-                              Category, Thread)
+                              Category, Thread, Metadata)
 
     return {
         'calendar': Calendar,
@@ -83,7 +83,8 @@ def transaction_objects():
         'thread': Thread,
         'label': Category,
         'folder': Category,
-        'account': Account
+        'account': Account,
+        'metadata': Metadata
     }
 
 
