@@ -91,7 +91,8 @@ setup(
              'bin/detect-utf7-folders',
              'bin/backfix-utf7-folders',
              'bin/populate-accounttransaction',
-             'bin/populate-accounttransaction-for-shard'
+             'bin/populate-accounttransaction-for-shard',
+             'bin/populate-imap-smtp-credentials'
              ],
 
     # See:
