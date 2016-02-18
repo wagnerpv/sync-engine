@@ -17,6 +17,9 @@ import sqlalchemy as sa
 def upgrade():
     from inbox.sqlalchemy_ext.util import JSON
 
+    shard_id = int(context.get_x_argument(as_dictionary=True).get('shard_id'))
+    namespace_id_type = sa.Integer() if shard_id == 0 else sa.BigInteger()
+
     op.create_table(
         'metadata',
         sa.Column('public_id', sa.BINARY(length=16), nullable=False),
@@ -27,7 +30,7 @@ def upgrade():
         sa.Column('app_id', sa.Integer(), nullable=True),
         sa.Column('app_client_id', sa.BINARY(length=16), nullable=False),
         sa.Column('app_type', sa.String(length=20), nullable=False),
-        sa.Column('namespace_id', sa.BigInteger(), nullable=False),
+        sa.Column('namespace_id', namespace_id_type, nullable=False),
         sa.Column('object_public_id', sa.String(length=191), nullable=False),
         sa.Column('object_type', sa.String(length=20), nullable=False),
         sa.Column('object_id', sa.BigInteger(), nullable=False),
