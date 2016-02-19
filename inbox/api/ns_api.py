@@ -30,7 +30,8 @@ from inbox.api.validation import (get_attachments, get_calendar,
                                   limit, offset, ValidatableArgument,
                                   strict_bool, validate_draft_recipients,
                                   valid_delta_object_types, valid_display_name,
-                                  noop_event_update, valid_category_type)
+                                  noop_event_update, valid_category_type,
+                                  comma_separated_email_list)
 from inbox.config import config
 from inbox.contacts.algorithms import (calculate_contact_scores,
                                        calculate_group_scores,
@@ -136,7 +137,8 @@ def thread_query_api():
     g.parser.add_argument('from', type=bounded_str, location='args')
     g.parser.add_argument('cc', type=bounded_str, location='args')
     g.parser.add_argument('bcc', type=bounded_str, location='args')
-    g.parser.add_argument('any_email', type=bounded_str, location='args')
+    g.parser.add_argument('any_email', type=comma_separated_email_list,
+                          location='args')
     g.parser.add_argument('started_before', type=timestamp, location='args')
     g.parser.add_argument('started_after', type=timestamp, location='args')
     g.parser.add_argument('last_message_before', type=timestamp,
@@ -222,7 +224,7 @@ def thread_api(public_id):
 #
 # Update thread
 #
-@app.route('/threads/<public_id>', methods=['PUT'])
+@app.route('/threads/<public_id>', methods=['PUT', 'PATCH'])
 def thread_api_update(public_id):
     try:
         valid_public_id(public_id)
@@ -257,7 +259,8 @@ def message_query_api():
     g.parser.add_argument('from', type=bounded_str, location='args')
     g.parser.add_argument('cc', type=bounded_str, location='args')
     g.parser.add_argument('bcc', type=bounded_str, location='args')
-    g.parser.add_argument('any_email', type=bounded_str, location='args')
+    g.parser.add_argument('any_email', type=comma_separated_email_list,
+                          location='args')
     g.parser.add_argument('started_before', type=timestamp, location='args')
     g.parser.add_argument('started_after', type=timestamp, location='args')
     g.parser.add_argument('last_message_before', type=timestamp,
@@ -356,7 +359,7 @@ def message_read_api(public_id):
     return encoder.jsonify(message)
 
 
-@app.route('/messages/<public_id>', methods=['PUT'])
+@app.route('/messages/<public_id>', methods=['PUT', 'PATCH'])
 def message_update_api(public_id):
     try:
         valid_public_id(public_id)
@@ -474,8 +477,8 @@ def folders_labels_create_api():
     return g.encoder.jsonify(category)
 
 
-@app.route('/folders/<public_id>', methods=['PUT'])
-@app.route('/labels/<public_id>', methods=['PUT'])
+@app.route('/folders/<public_id>', methods=['PUT', 'PATCH'])
+@app.route('/labels/<public_id>', methods=['PUT', 'PATCH'])
 def folder_label_update_api(public_id):
     category_type = g.namespace.account.category_type
     rule = request.url_rule.rule
@@ -740,7 +743,7 @@ def event_read_api(public_id):
     return g.encoder.jsonify(event)
 
 
-@app.route('/events/<public_id>', methods=['PUT'])
+@app.route('/events/<public_id>', methods=['PUT', 'PATCH'])
 def event_update_api(public_id):
     g.parser.add_argument('notify_participants', type=strict_bool,
                           location='args')
@@ -1109,7 +1112,8 @@ def draft_query_api():
     g.parser.add_argument('to', type=bounded_str, location='args')
     g.parser.add_argument('cc', type=bounded_str, location='args')
     g.parser.add_argument('bcc', type=bounded_str, location='args')
-    g.parser.add_argument('any_email', type=bounded_str, location='args')
+    g.parser.add_argument('any_email', type=comma_separated_email_list,
+                          location='args')
     g.parser.add_argument('started_before', type=timestamp, location='args')
     g.parser.add_argument('started_after', type=timestamp, location='args')
     g.parser.add_argument('last_message_before', type=timestamp,
@@ -1176,7 +1180,7 @@ def draft_create_api():
     return g.encoder.jsonify(draft)
 
 
-@app.route('/drafts/<public_id>', methods=['PUT'])
+@app.route('/drafts/<public_id>', methods=['PUT', 'PATCH'])
 def draft_update_api(public_id):
     data = request.get_json(force=True)
     original_draft = get_draft(public_id, data.get('version'), g.namespace.id,
