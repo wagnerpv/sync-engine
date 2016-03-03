@@ -23,7 +23,7 @@ from inbox.api.sending import send_draft, send_raw_mime
 from inbox.api.update import update_message, update_thread
 from inbox.api.kellogs import APIEncoder
 from inbox.api import filtering
-from inbox.api.validation import (get_attachments, get_calendar,
+from inbox.api.validation import (valid_account, get_attachments, get_calendar,
                                   get_recipients, get_draft, valid_public_id,
                                   valid_event, valid_event_update, timestamp,
                                   bounded_str, view, strict_parse_args,
@@ -97,6 +97,25 @@ def start():
     g.parser.add_argument('offset', default=0, type=offset, location='args')
 
 
+@app.before_request
+def before_remote_request():
+    """
+    Verify the validity of the account's credentials before performing a
+    request to the remote server.
+
+    The message and thread /search endpoints, and the /send endpoint directly
+    interact with the remote server. All create, update, delete requests
+    result in requests to the remote server via action syncback.
+
+    """
+    # Search uses 'GET', all the other requests we care about use a write
+    # HTTP method.
+    if (request.endpoint in ('namespace_api.message_search_api',
+                             'namespace_api.thread_search_api') or
+            request.method in ('POST', 'PUT', 'PATCH', 'DELETE')):
+        valid_account(g.namespace)
+
+
 @app.after_request
 def finish(response):
     if response.status_code == 200 and hasattr(g, 'db_session'):  # be cautions
@@ -116,6 +135,7 @@ def handle_not_implemented_error(error):
 
 @app.errorhandler(APIException)
 def handle_input_error(error):
+    log.info('Returning API error to client', error=error)
     response = flask_jsonify(message=error.message,
                              type='invalid_request_error')
     response.status_code = error.status_code
@@ -192,8 +212,8 @@ def thread_search_api():
         g.log.error(err_string)
         return err(400, err_string)
 
-    search_client = get_search_client(g.namespace.account)
     try:
+        search_client = get_search_client(g.namespace.account)
         results = search_client.search_threads(g.db_session, args['q'],
                                                offset=args['offset'],
                                                limit=args['limit'])
@@ -320,8 +340,8 @@ def message_search_api():
         g.log.error(err_string)
         return err(400, err_string)
 
-    search_client = get_search_client(g.namespace.account)
     try:
+        search_client = get_search_client(g.namespace.account)
         results = search_client.search_messages(g.db_session, args['q'],
                                                 offset=args['offset'],
                                                 limit=args['limit'])
@@ -1274,16 +1294,18 @@ def sync_deltas():
     g.parser.add_argument('timeout', type=int,
                           default=LONG_POLL_REQUEST_TIMEOUT, location='args')
     g.parser.add_argument('view', type=view, location='args')
-
+    # - Begin shim -
+    # Remove after folders and labels exposed in the Delta API for everybody,
+    # right now, only expose for Edgehill.
+    # Same for the account object.
+    g.parser.add_argument('exclude_folders', type=strict_bool, location='args')
+    g.parser.add_argument('exclude_account', type=strict_bool, location='args',
+                          default=True)
+    # - End shim -
     # Metadata has restricted access - only N1 can make a request with this
     # arg included. For everyone else, set exclude_metadata to True by default.
     g.parser.add_argument('exclude_metadata', type=strict_bool,
                           location='args', default=True)
-    # - Begin shim -
-    # Remove after folders and labels exposed in the Delta API for everybody,
-    # right now, only expose for Edgehill.
-    g.parser.add_argument('exclude_folders', type=strict_bool, location='args')
-    # - End shim -
     args = strict_parse_args(g.parser, request.args)
     exclude_types = args.get('exclude_types')
     include_types = args.get('include_types')
@@ -1293,6 +1315,7 @@ def sync_deltas():
     exclude_folders = args.get('exclude_folders')
     if exclude_folders is None:
         exclude_folders = True
+    exclude_account = args.get('exclude_account')
     # - End shim -
     cursor = args['cursor']
     timeout = args['timeout']
@@ -1321,7 +1344,7 @@ def sync_deltas():
             deltas, _ = delta_sync.format_transactions_after_pointer(
                 g.namespace, start_pointer, db_session, args['limit'],
                 exclude_types, include_types, exclude_folders,
-                exclude_metadata, expand=expand)
+                exclude_metadata, exclude_account, expand=expand)
 
         response = {
             'cursor_start': cursor,
@@ -1388,16 +1411,18 @@ def stream_changes():
     g.parser.add_argument('include_types', type=valid_delta_object_types,
                           location='args')
     g.parser.add_argument('view', type=view, location='args')
-
+    # - Begin shim -
+    # Remove after folders and labels exposed in the Delta API for everybody,
+    # right now, only expose for Edgehill.
+    # Same for the account object.
+    g.parser.add_argument('exclude_folders', type=strict_bool, location='args')
+    g.parser.add_argument('exclude_account', type=strict_bool, location='args',
+                          default=True)
+    # - End shim -
     # Metadata has restricted access - only N1 can make a request with this
     # arg included. For everyone else, set exclude_metadata to True by default.
     g.parser.add_argument('exclude_metadata', type=strict_bool,
                           location='args', default=True)
-    # - Begin shim -
-    # Remove after folders and labels exposed in the Delta API for everybody,
-    # right now, only expose for Edgehill.
-    g.parser.add_argument('exclude_folders', type=strict_bool, location='args')
-    # - End shim -
 
     args = strict_parse_args(g.parser, request.args)
     timeout = args['timeout'] or 1800
@@ -1412,6 +1437,7 @@ def stream_changes():
     exclude_folders = args.get('exclude_folders')
     if exclude_folders is None:
         exclude_folders = True
+    exclude_account = args.get('exclude_account')
     # End shim #
 
     if include_types and exclude_types:
@@ -1440,7 +1466,8 @@ def stream_changes():
         poll_interval=poll_interval, timeout=timeout,
         exclude_types=exclude_types, include_types=include_types,
         exclude_folders=exclude_folders,
-        exclude_metadata=exclude_metadata, expand=expand)
+        exclude_metadata=exclude_metadata, exclude_account=exclude_account,
+        expand=expand)
     return Response(stream_with_context(generator),
                     mimetype='text/event-stream')
 

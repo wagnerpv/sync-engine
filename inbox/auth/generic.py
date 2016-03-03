@@ -13,7 +13,7 @@ from inbox.basicauth import (ValidationError, UserRecoverableConfigError,
 from inbox.models import Namespace
 from inbox.models.backends.generic import GenericAccount
 from inbox.sendmail.smtp.postel import SMTPClient
-
+from inbox.util.url import matching_subdomains
 
 PROVIDER = 'generic'
 AUTH_HANDLER_CLS = 'GenericAuthHandler'
@@ -86,12 +86,21 @@ class GenericAuthHandler(AuthHandler):
 
         if self.provider_name == 'custom':
             for attribute in ('imap_server_host', 'smtp_server_host'):
-                value = getattr(account, '_{}'.format(attribute), None)
-                if (response.get(attribute) and value and
-                        response[attribute] != value):
-                    raise UserRecoverableConfigError(
-                        "Updating IMAP/ SMTP endpoints is not permitted. "
-                        "Please contact Nylas support to do so.")
+                old_value = getattr(account, '_{}'.format(attribute), None)
+                new_value = response.get(attribute)
+                if (new_value is not None and old_value is not None and
+                        new_value != old_value):
+
+                    # Before updating the domain name, check if:
+                    # 1/ they have the same parent domain
+                    # 2/ they direct to the same IP.
+                    if not matching_subdomains(new_value, old_value):
+                        raise UserRecoverableConfigError(
+                            "Updating IMAP/ SMTP endpoints is not permitted. "
+                            "Please contact Nylas support to do so.")
+
+                    # If all those conditions are met, update the address.
+                    setattr(account, '_{}'.format(attribute), new_value)
 
         account.ssl_required = response.get('ssl_required', True)
 
@@ -208,10 +217,11 @@ class GenericAuthHandler(AuthHandler):
                       email=account.email_address,
                       account_id=account.id,
                       error=e.message)
-            raise UserRecoverableConfigError("Full IMAP support is not "
-                                             "enabled for this account. "
-                                             "Please contact your domain "
-                                             "administrator and try again.")
+            error_message = ("Full IMAP support is not enabled for this account. "
+                             "Please contact your domain "
+                             "administrator and try again.")
+            raise UserRecoverableConfigError(error_message)
+
         finally:
             conn.logout()
 
@@ -222,9 +232,29 @@ class GenericAuthHandler(AuthHandler):
             smtp_client = SMTPClient(account)
             with smtp_client._get_connection():
                 pass
+        except socket.gaierror as exc:
+            log.error('Failed to resolve SMTP server domain',
+                      email=account.email_address,
+                      account_id=account.id,
+                      error=exc)
+            error_message = ("Couldn't resolve the SMTP server domain name. "
+                             "Please check that your SMTP settings are correct.")
+            raise UserRecoverableConfigError(error_message)
+
+        except socket.timeout as exc:
+            log.error('TCP timeout when connecting to SMTP server',
+                      email=account.email_address,
+                      account_id=account.id,
+                      error=exc)
+
+            error_message = ("Connection timeout when connecting to SMTP server. "
+                             "Please check that your SMTP settings are correct.")
+            raise UserRecoverableConfigError(error_message)
+
         except Exception as exc:
             log.error('Failed to establish an SMTP connection',
                       email=account.email_address,
+                      smtp_endpoint=account.smtp_endpoint,
                       account_id=account.id,
                       error=exc)
             raise UserRecoverableConfigError("Please check that your SMTP "
@@ -283,7 +313,8 @@ def _auth_is_invalid(exc):
         'invalid login or password',
         'login login error password error',
         '[auth] authentication failed.',
-        'invalid login credentials'
+        'invalid login credentials',
+        '[ALERT] Please log in via your web browser',
     )
     return any(exc.message.lower().startswith(msg) for msg in
                AUTH_INVALID_PREFIXES)
