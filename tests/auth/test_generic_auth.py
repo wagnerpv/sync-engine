@@ -132,6 +132,39 @@ def test_double_auth(db):
     assert account.smtp_password == password
 
 
+def test_successful_reauth_resets_sync_state(db):
+    settings = {
+        'provider': 'yahoo',
+        'settings': {
+            'name': 'Y.Y!',
+            'locale': 'fr',
+            'email': 'cypresstest@yahoo.com',
+            'password': 'IHate2Gmail'}
+    }
+    email = settings['settings']['email']
+    handler = GenericAuthHandler(settings['provider'])
+
+    account = handler.create_account(email, settings['settings'])
+    assert handler.verify_account(account) is True
+    # Brand new accounts have `sync_state`=None.
+    assert account.sync_state is None
+    db.session.add(account)
+    db.session.commit()
+
+    # Pretend account sync starts, and subsequently the password changes,
+    # causing the account to be in `sync_state`='invalid'.
+    account.mark_invalid()
+    db.session.commit()
+    assert account.sync_state == 'invalid'
+
+    # Verify the `sync_state` is reset to 'running' on a successful "re-auth".
+    account = handler.update_account(account, settings['settings'])
+    assert handler.verify_account(account) is True
+    assert account.sync_state == 'running'
+    db.session.add(account)
+    db.session.commit()
+
+
 def generate_endpoint_updates(settings):
     for key in ('imap_server_host', 'smtp_server_host'):
         attr = '_{}'.format(key)
