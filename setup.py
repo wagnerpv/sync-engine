@@ -66,10 +66,7 @@ setup(
 
     scripts=['bin/inbox-start',
              'bin/inbox-console',
-             'bin/migrate-account',
-             'bin/migrate-account-bulk',
              'bin/summary-stats',
-             'bin/start-stop-account',
              'bin/inbox-auth',
              'bin/delete-account-data',
              'bin/create-db',
@@ -85,31 +82,15 @@ setup(
              'bin/contact-search-service',
              'bin/contact-search-backfill',
              'bin/contact-search-delete-index',
-             'bin/update-sync-host-format',
              'bin/populate-sync-queue',
-             'bin/backpopulate-sync-assignments',
              'bin/delete-marked-accounts',
-             'bin/detect-utf7-folders',
-             'bin/backfix-utf7-folders',
-             'bin/populate-imap-smtp-credentials'
+             'bin/backfix-generic-imap-separators.py',
+             'bin/correct-autoincrements'
              ],
 
     # See:
     # https://pythonhosted.org/setuptools/setuptools.html#dynamic-discovery-of-services-and-plugins
     # https://pythonhosted.org/setuptools/pkg_resources.html#entry-points
-    entry_points={
-        # See https://pythonhosted.org/setuptools/setuptools.html#automatic-script-creation # noqa
-        # 'console_scripts': [
-        #     'inbox-consistency-check = inbox.util.consistency_check.__main__:main',  # noqa
-        # ],
-
-        # See inbox/util/consistency_check/__main__.py
-        'inbox.consistency_check_plugins': [
-            'list=inbox.util.consistency_check.list:ListPlugin',
-            'imap_gm=inbox.util.consistency_check.imap_gm:ImapGmailPlugin',
-            'local_gm=inbox.util.consistency_check.local_gm:LocalGmailPlugin',
-        ],
-    },
     zip_safe=False,
     author="Nylas Team",
     author_email="team@nylas.com",

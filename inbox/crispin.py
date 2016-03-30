@@ -351,8 +351,17 @@ class CrispinClient(object):
     def folder_delimiter(self):
         folders = self._fetch_folder_list()
         _, delimiter, __ = folders[0]
-
         return delimiter
+
+    @property
+    def folder_separator(self):
+        folder_prefix, folder_separator = self.conn.namespace()[0][0]
+        return folder_separator
+
+    @property
+    def folder_prefix(self):
+        folder_prefix, folder_separator = self.conn.namespace()[0][0]
+        return folder_prefix
 
     def sync_folders(self):
         """
@@ -458,6 +467,7 @@ class CrispinClient(object):
             'spam': 'spam',
             'archive': 'archive',
             'sent': 'sent',
+            'sent items': 'sent',
             'trash': 'trash'}
 
         # Additionally we provide a custom mapping for providers that
