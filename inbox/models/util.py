@@ -134,6 +134,7 @@ def delete_marked_accounts(shard_id, throttle=False, dry_run=False):
             deleted_count += 1
             statsd_client.timing('mailsync.account_deletion.queue.deleted',
                                  time.time() - start_time)
+            gevent.sleep(60)
         except Exception:
             log_uncaught_errors(log, account_id=account_id)
 
@@ -241,7 +242,8 @@ def _batch_delete(engine, table, xxx_todo_changeme, throttle=False,
              batches=batches)
     start = time.time()
 
-    query = 'DELETE FROM {} WHERE {}={} LIMIT 2000;'.format(table, column, id_)
+    query = 'DELETE FROM {} WHERE {}={} LIMIT 20000;'.format(
+        table, column, id_)
 
     pruned_messages = False
     for i in range(0, batches):
@@ -267,6 +269,16 @@ def _batch_delete(engine, table, xxx_todo_changeme, throttle=False,
 
 
 def check_throttle():
+    """ Returns True if deletions should be throttled and False otherwise.
+
+    The current logic throttles deletions if any production sync-mysql-node
+    slaves are over 10 seconds behind their master, or if the average CPU load
+    across the production sync-mysql-node fleet is above 70%.
+
+    check_throttle is ignored entirely if the separate `throttle` flag is False
+    (meaning that throttling is not done at all), but if throttling is enabled,
+    this method determines when."""
+
     # Ensure replica lag is not spiking
     base_url = config["UMPIRE_BASE_URL"]
     replica_lag_url = ("https://{}/check?metric=maxSeries(servers.prod."
@@ -283,9 +295,29 @@ def check_throttle():
     if replica_lag_status_code != 200 or cpu_status_code != 200:
         return True
 
-    # Stop deletion before backups are scheduled to start(1am UTC)
-    # and resume when backups complete (~9:30am, but set to 10am to
-    # leave room for error)
+    # Stop deletion before backups are scheduled to start and resume
+    # when backups complete (~8.5 hours later but allow 9h just in case)
+    #
+    # Unifying this with the actual backup timing is tracked in
+    # https://phab.nylas.com/T6786
+    backup_start_hour_utc = 8  # CHANGE THIS if backups get rescheduled
+    backup_duration_hours = 9  # CHANGE THIS if backup length changes much
+    backup_end_hour_utc = (backup_start_hour_utc + backup_duration_hours) % 24
     now = datetime.datetime.utcnow()
-    if now.hour < 10:
+    # We are trying to throttle during a specific backup window of
+    # <backup_duration_hours> hours, but the window may wrap around from one
+    # day to the next, making it difficult to do a naive hour comparison.
+    #
+    # Therefore we have to compare the current hour to the backup window in
+    # multiple chunks. First we compare to the part of the window in the same
+    # day as when the backup started, and then we compare to the part of the
+    # window in the next day.
+    if (now.hour >= backup_start_hour_utc and
+            now.hour < min(backup_start_hour_utc + backup_duration_hours, 24)):
         return True
+    elif (backup_end_hour_utc <= backup_start_hour_utc and
+              now.hour < backup_end_hour_utc and
+              now.hour >= (backup_end_hour_utc - backup_duration_hours)):
+        return True
+    else:
+        return False
