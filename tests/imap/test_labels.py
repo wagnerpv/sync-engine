@@ -53,7 +53,7 @@ def add_custom_label(db, default_account, message):
     existing = [c.name for c in imapuid.categories][0]
     imapuid.update_labels(['<3'])
     db.session.commit()
-    assert set([c.name for c in imapuid.categories]) == set([existing, None])
+    assert set([c.name for c in imapuid.categories]) == set([existing, ''])
     update_message_metadata(db.session, default_account, message, False)
     db.session.commit()
     return message

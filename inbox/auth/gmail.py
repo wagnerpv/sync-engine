@@ -137,9 +137,8 @@ class GmailAuthHandler(OAuthAuthHandler):
                               response.get('sync_email', True))
         account.sync_contacts = (account.sync_contacts or
                                  response.get('contacts', True))
-
-        sync_events = int(response.get('events', 1))
-        account.sync_events = (sync_events or account.sync_events)
+        account.sync_events = (account.sync_events or
+                               response.get('events', True))
 
         # These values are deprecated and should not be used, along
         # with the account's refresh_token. Access all these values
@@ -232,7 +231,7 @@ class GmailAuthHandler(OAuthAuthHandler):
             url_args['login_hint'] = email_address
         url = url_concat(self.OAUTH_AUTHENTICATE_URL, url_args)
 
-        print 'To authorize Inbox, visit this URL and follow the directions:'
+        print 'To authorize Nylas, visit this URL and follow the directions:'
         print '\n{}'.format(url)
 
         while True:
