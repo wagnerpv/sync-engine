@@ -4,6 +4,8 @@ from requests.exceptions import HTTPError
 from nylas.logging import get_logger
 logger = get_logger()
 
+from gevent import sleep
+
 from inbox.basicauth import AccessNotEnabledError, OAuthError
 from inbox.config import config
 from inbox.sync.base_sync import BaseSyncMonitor
@@ -33,6 +35,7 @@ class EventSync(BaseSyncMonitor):
         bind_context(self, 'eventsync', account_id)
         # Only Google for now, can easily parametrize by provider later.
         self.provider = GoogleEventsProvider(account_id, namespace_id)
+        self.log = logger.new(account_id=account_id, component='calendar sync')
 
         BaseSyncMonitor.__init__(self,
                                  account_id,
@@ -97,6 +100,7 @@ def handle_calendar_deletes(namespace_id, deleted_calendar_uids, log,
         if local_calendar is not None:
             # Cascades to associated events via SQLAlchemy 'delete' cascade
             db_session.delete(local_calendar)
+            db_session.commit()
             deleted_count += 1
     log.info('deleted calendars', deleted=deleted_count)
 
@@ -120,9 +124,9 @@ def handle_calendar_updates(namespace_id, calendars, log, db_session):
             local_calendar = Calendar(namespace_id=namespace_id)
             local_calendar.update(calendar)
             db_session.add(local_calendar)
-            db_session.flush()
             added_count += 1
 
+        db_session.commit()
         ids_.append((local_calendar.uid, local_calendar.id))
 
     log.info('synced added and updated calendars', added=added_count,
@@ -282,8 +286,11 @@ class GoogleEventSync(EventSync):
                             calendar_id=cal.id,
                             calendar_uid=cal.uid)
                         db_session.delete(cal)
+                        db_session.commit()
                     else:
                         raise exc
+
+                sleep(1)
 
     def _sync_calendar_list(self, account, db_session):
         sync_timestamp = datetime.utcnow()

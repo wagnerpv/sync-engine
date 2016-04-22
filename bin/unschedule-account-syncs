@@ -1,9 +1,13 @@
 #!/usr/bin/env python
+import json
 import click
+import requests
 
 from boto import ec2
 
 from inbox.scheduling.queue import QueueClient
+
+HTTP_FRONTEND_PORT_BASE = 16384
 
 
 def get_zone_for_instance(hostname):
@@ -27,11 +31,13 @@ def get_zone_for_instance(hostname):
 
 @click.command()
 @click.option('--dry-run', is_flag=True, default=False)
+@click.option('--number', type=int, help='how many accounts to unschedule')
 @click.argument('hostname')
-def main(dry_run, hostname):
+def main(dry_run, number, hostname):
     """
     Unschedule all accounts assigned to a given sync host.
-    Intended primarily for use when decomissioning sync instances.
+    Intended primarily for use when decomissioning sync instances or for
+    manually unloading an overloaded sync instance.
 
     """
     zone = get_zone_for_instance(hostname)
@@ -40,14 +46,30 @@ def main(dry_run, hostname):
     to_unschedule = [(account_id, host) for account_id, host in
                      qc.assigned().items() if host.startswith(hostname)]
 
+    if number:
+        to_unschedule = to_unschedule[:number]
+
     if to_unschedule:
         if dry_run:
             for account_id, host in to_unschedule:
                 print "Would unassign", account_id
         else:
             for account_id, host in to_unschedule:
-                print "Unassigning", account_id
-                qc.unassign(account_id, host)
+                hostname, cpu_id = host.split(':')
+                host_ip = hostname.replace('sync-', '').replace('-', '.')
+                port = HTTP_FRONTEND_PORT_BASE + int(cpu_id)
+                unassign_url = 'http://' + ':'.join([host_ip, str(port)]) + '/unassign'
+
+                resp = requests.post(
+                    unassign_url,
+                    data=json.dumps({'account_id': account_id}),
+                    headers={'content-type': 'application/json'})
+                if resp.status_code == 200:
+                    print "Unassigned", account_id
+                else:
+                    print "Couldn't unassign {}. Received HTTP code {} "\
+                          "from {}.".format(
+                              account_id, resp.status_code, unassign_url)
     else:
         print "No syncs to unschedule for", hostname
 
