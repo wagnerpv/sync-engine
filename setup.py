@@ -89,7 +89,9 @@ setup(
              'bin/correct-autoincrements',
              'bin/update-categories',
              'bin/detect-missing-sync-host',
-             'bin/purge-transaction-log'
+             'bin/purge-transaction-log',
+             'bin/mysql-prompt',
+             'bin/toggle-s3-sync',
              ],
 
     # See:
