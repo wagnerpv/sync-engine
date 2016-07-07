@@ -32,6 +32,8 @@ SYNC_POLL_INTERVAL = 10
 NUM_CPU_SAMPLES = (OVERLOAD_MIN * 60) / SYNC_POLL_INTERVAL
 NOMINAL_THRESHOLD = 90.0
 
+MAX_ACCOUNTS_PER_PROCESS = config.get('MAX_ACCOUNTS_PER_PROCESS', 150)
+
 
 class SyncService(object):
     """
@@ -40,16 +42,16 @@ class SyncService(object):
     process_identifier: string
         Unique identifying string for this process (currently
         <hostname>:<process_number>)
-    cpu_id: int
-        If a system has 4 cores, value from 0-3. (Each sync service on the
-        system should get a different value.)
+    process_number: int
+        If a system is launching 16 sync processes, value from 0-15. (Each
+        sync service on the system should get a different value.)
     poll_interval : int
         Seconds between polls for account changes.
     """
-    def __init__(self, process_identifier, cpu_id,
+    def __init__(self, process_identifier, process_number,
                  poll_interval=SYNC_POLL_INTERVAL):
         self.host = platform.node()
-        self.cpu_id = cpu_id
+        self.process_number = process_number
         self.process_identifier = process_identifier
         self.monitor_cls_for = {mod.PROVIDER: getattr(
             mod, mod.SYNC_MONITOR_CLS) for mod in module_registry.values()
@@ -60,7 +62,7 @@ class SyncService(object):
                 self.monitor_cls_for[p_name] = self.monitor_cls_for["generic"]
 
         self.log = get_logger()
-        self.log.bind(cpu_id=cpu_id)
+        self.log.bind(process_number=process_number)
         self.log.info('starting mail sync process',
                       supported_providers=module_registry.keys())
 
@@ -116,17 +118,30 @@ class SyncService(object):
         cpus_over_nominal = all([cpu_usage > NOMINAL_THRESHOLD for cpu_usage in cpu_averages])
 
         # Conservatively, stop accepting accounts if the CPU usage is over
-        # NOMINAL_THRESHOLD for every core.
-        if self.stealing_enabled and not cpus_over_nominal:
+        # NOMINAL_THRESHOLD for every core, or if the total # of accounts
+        # being synced by a single process exceeds the threshold. Excessive
+        # concurrency per process can result in lowered database throughput
+        # or availability problems, since many transactions may be held open
+        # at the same time.
+        if self.stealing_enabled and not cpus_over_nominal and \
+                len(self.syncing_accounts) < MAX_ACCOUNTS_PER_PROCESS:
             r = self.queue_client.claim_next(self.process_identifier)
             if r:
                 self.log.info('Claimed new account sync', account_id=r)
+        else:
+            if not self.stealing_enabled:
+                reason = 'stealing disabled'
+            elif cpus_over_nominal:
+                reason = 'CPU too high'
+            else:
+                reason = 'reached max accounts for process'
+            self.log.info('Not claiming new account sync', reason=reason)
 
         # Determine which accounts to sync
         start_accounts = self.accounts_to_sync()
         statsd_client.gauge(
-            'accounts.{}.mailsync-{}.count'.format(self.host, self.cpu_id),
-            len(start_accounts))
+            'accounts.{}.mailsync-{}.count'.format(
+                self.host, self.process_number), len(start_accounts))
 
         # Perform the appropriate action on each account
         for account_id in start_accounts:
