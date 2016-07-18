@@ -233,15 +233,15 @@ class CrispinClient(object):
     """
     Generic IMAP client wrapper.
 
-    One thing to note about crispin clients is that *all* calls operate on
-    the currently selected folder.
+    Generally, crispin client calls operate on the currently selected folder.
+    There are some specific calls which may change the selected folder as a
+    part of their work and may leave it selected at the end of the call, since
+    folder selects are expensive in IMAP. These methods are called out in
+    their docstrings.
 
-    Crispin will NEVER implicitly select a folder for you.
-
-    This is very important! IMAP only guarantees that folder message UIDs
-    are valid for a "session", which is defined as from the time you
-    SELECT a folder until the connection is closed or another folder is
-    selected.
+    IMAP only guarantees that folder message UIDs are valid for a "session",
+    which is defined as from the time you SELECT a folder until the connection
+    is closed or another folder is selected.
 
     Crispin clients *always* return long ints rather than strings for number
     data types, such as message UIDs, Google message IDs, and Google thread
@@ -257,6 +257,10 @@ class CrispinClient(object):
     ----------
     account_id : int
         Database id of the associated IMAPAccount.
+    provider_info: dict
+        Provider info from inbox/providers.py
+    email_address: str
+        Email address associated with the account.
     conn : IMAPClient
         Open IMAP connection (should be already authed).
     readonly : bool
@@ -746,6 +750,8 @@ class CrispinClient(object):
         header. We first delete the message from the Sent folder, and then
         also delete it from the Trash folder if necessary.
 
+        Leaves the Trash folder selected at the end of the method.
+
         """
         log.info('Trying to delete sent message',
                  message_id_header=message_id_header)
@@ -764,9 +770,12 @@ class CrispinClient(object):
         the message from the Drafts folder,
         and then also delete it from the Trash folder if necessary.
 
+        Leaves the Trash folder selected at the end of the method.
+
         """
-        log.info('Trying to delete draft', message_id_header=message_id_header)
         drafts_folder_name = self.folder_names()['drafts'][0]
+        log.info('Trying to delete draft',
+                message_id_header=message_id_header, folder=drafts_folder_name)
         self.conn.select_folder(drafts_folder_name)
         draft_deleted = self._delete_message(message_id_header)
         if draft_deleted:
@@ -1033,6 +1042,40 @@ class GmailCrispinClient(CrispinClient):
     def _decode_labels(self, labels):
         return map(imapclient.imap_utf7.decode, labels)
 
+    def delete_draft(self, message_id_header):
+        """
+        Delete a message in the drafts folder, as identified by the Message-Id
+        header. This overrides the parent class's method because gmail has
+        weird delete semantics: to delete a message from a "folder" (actually a
+        label) besides Trash or Spam, you must copy it to the trash. Issuing a
+        delete command will only remove the label. So here we first copy the
+        message from the draft folder to Trash, and then also delete it from the
+        Trash folder to permanently delete it.
+
+        Leaves the Trash folder selected at the end of the method.
+        """
+
+        log.info('Trying to delete gmail draft',
+                message_id_header=message_id_header)
+        drafts_folder_name = self.folder_names()['drafts'][0]
+        trash_folder_name = self.folder_names()['trash'][0]
+
+        # First find the draft in the drafts folder
+        self.conn.select_folder(drafts_folder_name)
+        matching_uids = self.find_by_header('Message-Id', message_id_header)
+        if not matching_uids:
+            return False
+
+        # To delete, first copy the message to trash (sufficient to move from
+        # gmail's All Mail folder to Trash folder)
+        self.conn.copy(matching_uids, trash_folder_name)
+
+        # Next, delete the message from trash (in the normal way) to permanently
+        # delete it.
+        self.conn.select_folder(trash_folder_name)
+        self._delete_message(message_id_header, False)
+        return True
+
     def delete_sent_message(self, message_id_header, delete_multiple=False):
         """
         Delete a message in the sent folder, as identified by the Message-Id
@@ -1042,6 +1085,9 @@ class GmailCrispinClient(CrispinClient):
         delete command will only remove the label. So here we first copy the
         message from the Sent folder to Trash, and then also delete it from the
         Trash folder to permanently delete it.
+
+        Leaves the Trash folder selected at the end of the method.
+
         """
         log.info('Trying to delete sent message',
                  message_id_header=message_id_header)
